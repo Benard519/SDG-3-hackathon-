@@ -5,15 +5,23 @@ import {
   Activity, 
   Clock, 
   AlertTriangle,
-  TrendingUp,
   Phone,
   MapPin,
-  Calendar
+  Calendar,
+  Plus,
+  Crown,
+  Thermometer,
+  Smile,
+  TrendingUp,
+  Users,
+  Check
 } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { BackgroundImage } from '../ui/BackgroundImage';
+import { Modal } from '../ui/Modal';
+import { HealthLogForm } from '../health/HealthLogForm';
 import { supabase } from '../../utils/supabase';
 import { Patient, HealthLog, Reminder, EmergencyAlert } from '../../types';
 import { useAuth } from '../../hooks/useAuth';
@@ -26,6 +34,9 @@ export const FamilyDashboard: React.FC = () => {
   const [recentLogs, setRecentLogs] = useState<HealthLog[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<EmergencyAlert[]>([]);
   const [upcomingReminders, setUpcomingReminders] = useState<Reminder[]>([]);
+  const [showHealthLogForm, setShowHealthLogForm] = useState(false);
+  const [selectedPatient, setSelectedPatient] = useState<string>('');
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,11 +52,12 @@ export const FamilyDashboard: React.FC = () => {
     try {
       setLoading(true);
       
-      // Fetch patients where user is in family_members array
-      const { data: patientsData } = await supabase
+      // Fetch patients where this user is in family_members array
+      let { data: patientsData } = await supabase
         .from('patients')
         .select('*')
-        .contains('family_members', [userProfile.id]);
+        .contains('family_members', [userProfile.id])
+        .order('created_at', { ascending: false });
 
       if (patientsData && patientsData.length > 0) {
         setPatients(patientsData);
@@ -77,12 +89,13 @@ export const FamilyDashboard: React.FC = () => {
           .order('due_time', { ascending: true })
           .limit(5);
 
-        if (logsData) setRecentLogs(logsData);
-        if (alertsData) setActiveAlerts(alertsData);
-        if (remindersData) setUpcomingReminders(remindersData);
+        setRecentLogs(logsData || []);
+        setActiveAlerts(alertsData || []);
+        setUpcomingReminders(remindersData || []);
       }
     } catch (error) {
       console.error('Error fetching family data:', error);
+      // Don't clear data on error, just log it
     } finally {
       setLoading(false);
     }
@@ -91,9 +104,8 @@ export const FamilyDashboard: React.FC = () => {
   const setupRealtimeSubscriptions = () => {
     if (!userProfile) return;
 
-    // Subscribe to health logs updates
-    const healthLogsSubscription = supabase
-      .channel('family_health_logs')
+    const subscription = supabase
+      .channel('family_updates')
       .on(
         'postgres_changes',
         {
@@ -102,14 +114,9 @@ export const FamilyDashboard: React.FC = () => {
           table: 'health_logs'
         },
         () => {
-          fetchFamilyData(); // Refresh data on any change
+          fetchFamilyData();
         }
       )
-      .subscribe();
-
-    // Subscribe to emergency alerts
-    const alertsSubscription = supabase
-      .channel('family_alerts')
       .on(
         'postgres_changes',
         {
@@ -124,9 +131,14 @@ export const FamilyDashboard: React.FC = () => {
       .subscribe();
 
     return () => {
-      healthLogsSubscription.unsubscribe();
-      alertsSubscription.unsubscribe();
+      subscription.unsubscribe();
     };
+  };
+
+  const handleHealthLogSuccess = (log: HealthLog) => {
+    setRecentLogs(prev => [log, ...prev].slice(0, 10));
+    setShowHealthLogForm(false);
+    setSelectedPatient('');
   };
 
   const getHealthStatusColor = (type: string, value: string) => {
@@ -151,6 +163,16 @@ export const FamilyDashboard: React.FC = () => {
     }
   };
 
+  const getHealthIcon = (type: string) => {
+    switch (type) {
+      case 'blood_pressure': return Heart;
+      case 'blood_sugar': return Activity;
+      case 'temperature': return Thermometer;
+      case 'mood': return Smile;
+      default: return Activity;
+    }
+  };
+
   const getPatientName = (patientId: string) => {
     const patient = patients.find(p => p.id === patientId);
     return patient?.name || 'Unknown Patient';
@@ -161,27 +183,6 @@ export const FamilyDashboard: React.FC = () => {
       <BackgroundImage>
         <div className="flex items-center justify-center h-96">
           <LoadingSpinner size="lg" message="Loading family dashboard..." />
-        </div>
-      </BackgroundImage>
-    );
-  }
-
-  if (patients.length === 0) {
-    return (
-      <BackgroundImage>
-        <div className="max-w-4xl mx-auto p-4">
-          <Card className="text-center py-12" glass={true}>
-            <Heart className="w-16 h-16 mx-auto mb-6 text-gray-400" />
-            <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-              No Patients Assigned
-            </h2>
-            <p className="text-gray-600 mb-6">
-              You don't have access to any patient data yet. Please contact your caregiver to be added as a family member.
-            </p>
-            <Button onClick={() => window.location.reload()}>
-              Refresh
-            </Button>
-          </Card>
         </div>
       </BackgroundImage>
     );
@@ -204,7 +205,7 @@ export const FamilyDashboard: React.FC = () => {
             }}
             transition={{ duration: 3, repeat: Infinity }}
           >
-            Family Dashboard
+            Welcome back, {userProfile?.full_name}!
           </motion.h1>
           <motion.p 
             className="text-xl text-gray-700 font-medium"
@@ -214,6 +215,73 @@ export const FamilyDashboard: React.FC = () => {
           >
             Stay connected with your loved ones' care
           </motion.p>
+        </motion.div>
+
+        {/* Upgrade prompt */}
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={ANIMATION_VARIANTS.fadeIn}
+        >
+          <Card className="border-blue-200 bg-gradient-to-r from-blue-50 to-purple-50" glass={false}>
+            <div className="flex items-center justify-between p-6">
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center justify-center w-12 h-12 bg-blue-100 rounded-xl">
+                  <Crown className="w-6 h-6 text-blue-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Upgrade to Premium Care</h3>
+                  <p className="text-gray-600">Get unlimited patients, advanced analytics, and real-time updates for just $35/month</p>
+                </div>
+              </div>
+              <Button onClick={() => setShowUpgrade(true)} className="whitespace-nowrap">
+                <Crown className="w-4 h-4 mr-2" />
+                Upgrade Now
+              </Button>
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* Quick actions */}
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={ANIMATION_VARIANTS.fadeIn}
+        >
+          <Card glass={true}>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-semibold text-gray-900">Quick Actions</h2>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Button
+                onClick={() => setShowHealthLogForm(true)}
+                className="flex items-center justify-center h-20 text-lg"
+                disabled={patients.length === 0}
+              >
+                <Plus className="w-6 h-6 mr-2" />
+                Log Health Data
+              </Button>
+              
+              <Button
+                variant="secondary"
+                className="flex items-center justify-center h-20 text-lg"
+                onClick={() => setShowUpgrade(true)}
+              >
+                <TrendingUp className="w-6 h-6 mr-2" />
+                View Health Trends
+              </Button>
+              
+              <Button
+                variant="outline"
+                className="flex items-center justify-center h-20 text-lg"
+                onClick={() => setShowUpgrade(true)}
+              >
+                <Calendar className="w-6 h-6 mr-2" />
+                Manage Reminders
+              </Button>
+            </div>
+          </Card>
         </motion.div>
 
         {/* Emergency alerts */}
@@ -247,7 +315,7 @@ export const FamilyDashboard: React.FC = () => {
                     </div>
                     <Button variant="emergency" size="sm">
                       <Phone className="w-4 h-4 mr-1" />
-                      Call
+                      Call 911
                     </Button>
                   </div>
                 ))}
@@ -263,55 +331,85 @@ export const FamilyDashboard: React.FC = () => {
           animate="visible"
           variants={ANIMATION_VARIANTS.stagger}
         >
-          {patients.map((patient) => {
-            const patientLogs = recentLogs.filter(log => log.patient_id === patient.id);
-            const latestLog = patientLogs[0];
-            
-            return (
-              <motion.div key={patient.id} variants={ANIMATION_VARIANTS.fadeIn}>
-                <Card glass={true} className="h-full">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-semibold text-gray-900">{patient.name}</h3>
-                    <span className="text-sm text-gray-500">Age {patient.age}</span>
+          {patients.length === 0 ? (
+            <div className="col-span-full">
+              <Card glass={true}>
+                <div className="text-center py-12 text-gray-500">
+                  <Users className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                  <h3 className="text-xl font-medium text-gray-700 mb-2">No Patients Available</h3>
+                  <p className="mb-4">You haven't been assigned to any patients yet. Ask your caregiver to add you to a patient's family members list.</p>
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mt-4">
+                    <p className="text-sm text-blue-800">
+                      <strong>How to get access:</strong> Ask your caregiver to add your email address to a patient's family members list in their Patient Management section.
+                    </p>
                   </div>
-                  
-                  {patient.medical_conditions.length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-sm font-medium text-gray-700 mb-2">Conditions:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {patient.medical_conditions.map((condition, index) => (
-                          <span
-                            key={index}
-                            className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
-                          >
-                            {condition}
-                          </span>
-                        ))}
-                      </div>
+                </div>
+              </Card>
+            </div>
+          ) : (
+            patients.map((patient) => {
+              const patientLogs = recentLogs.filter(log => log.patient_id === patient.id);
+              const latestLog = patientLogs[0];
+              
+              return (
+                <motion.div key={patient.id} variants={ANIMATION_VARIANTS.fadeIn}>
+                  <Card glass={true} className="h-full">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xl font-semibold text-gray-900">{patient.name}</h3>
+                      <span className="text-sm text-gray-500">Age {patient.age}</span>
                     </div>
-                  )}
+                    
+                    {patient.medical_conditions.length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-sm font-medium text-gray-700 mb-2">Conditions:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {patient.medical_conditions.map((condition, index) => (
+                            <span
+                              key={index}
+                              className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
+                            >
+                              {condition}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
-                  {latestLog ? (
-                    <div className="bg-gray-50 rounded-xl p-4">
-                      <p className="text-sm font-medium text-gray-700 mb-1">Latest Update:</p>
-                      <div className="flex items-center justify-between">
-                        <span className="capitalize text-gray-900">
-                          {latestLog.type.replace('_', ' ')}: {latestLog.value}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {new Date(latestLog.created_at).toLocaleDateString()}
-                        </span>
+                    {latestLog ? (
+                      <div className="bg-gray-50 rounded-xl p-4 mb-4">
+                        <p className="text-sm font-medium text-gray-700 mb-1">Latest Update:</p>
+                        <div className="flex items-center justify-between">
+                          <span className="capitalize text-gray-900">
+                            {latestLog.type.replace('_', ' ')}: {latestLog.value}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {new Date(latestLog.created_at).toLocaleDateString()}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="bg-gray-50 rounded-xl p-4 text-center text-gray-500">
-                      No recent health updates
-                    </div>
-                  )}
-                </Card>
-              </motion.div>
-            );
-          })}
+                    ) : (
+                      <div className="bg-gray-50 rounded-xl p-4 mb-4 text-center text-gray-500">
+                        No recent health updates
+                      </div>
+                    )}
+
+                    <Button
+                      onClick={() => {
+                        setSelectedPatient(patient.id);
+                        setShowHealthLogForm(true);
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Log Health Data
+                    </Button>
+                  </Card>
+                </motion.div>
+              );
+            })
+          )}
         </motion.div>
 
         {/* Recent activity and reminders */}
@@ -328,10 +426,19 @@ export const FamilyDashboard: React.FC = () => {
                 <div className="text-center py-8 text-gray-500">
                   <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   <p>No recent health updates</p>
+                  <Button 
+                    onClick={() => setShowHealthLogForm(true)}
+                    className="mt-4"
+                    size="sm"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add First Health Log
+                  </Button>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {recentLogs.slice(0, 5).map((log) => {
+                    const Icon = getHealthIcon(log.type);
                     const statusColor = getHealthStatusColor(log.type, log.value);
                     
                     return (
@@ -340,19 +447,21 @@ export const FamilyDashboard: React.FC = () => {
                         className="flex items-center justify-between p-4 bg-gray-50 rounded-xl"
                         whileHover={{ scale: 1.02 }}
                       >
-                        <div>
-                          <p className="font-medium text-gray-900">
-                            {getPatientName(log.patient_id)}
-                          </p>
-                          <p className="text-sm text-gray-600 capitalize">
-                            {log.type.replace('_', ' ')}: {log.value}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {new Date(log.created_at).toLocaleString()}
-                          </p>
-                        </div>
-                        <div className={`px-3 py-1 rounded-full text-sm font-medium ${statusColor}`}>
-                          {log.value}
+                        <div className="flex items-center space-x-3">
+                          <div className={`p-2 rounded-lg ${statusColor}`}>
+                            <Icon className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900">
+                              {getPatientName(log.patient_id)}
+                            </p>
+                            <p className="text-sm text-gray-600 capitalize">
+                              {log.type.replace('_', ' ')}: {log.value}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {new Date(log.created_at).toLocaleString()}
+                            </p>
+                          </div>
                         </div>
                       </motion.div>
                     );
@@ -403,7 +512,7 @@ export const FamilyDashboard: React.FC = () => {
           </motion.div>
         </div>
 
-        {/* Quick contact section */}
+        {/* Emergency contacts */}
         <motion.div
           initial="hidden"
           animate="visible"
@@ -416,7 +525,7 @@ export const FamilyDashboard: React.FC = () => {
                 <div key={patient.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
                   <div>
                     <p className="font-medium text-gray-900">{patient.name}</p>
-                    <p className="text-sm text-gray-600">Emergency Contact</p>
+                    <p className="text-sm text-gray-600">{patient.emergency_contact}</p>
                   </div>
                   <Button
                     variant="secondary"
@@ -431,6 +540,113 @@ export const FamilyDashboard: React.FC = () => {
             </div>
           </Card>
         </motion.div>
+
+        {/* Health log modal */}
+        <Modal
+          isOpen={showHealthLogForm}
+          onClose={() => {
+            setShowHealthLogForm(false);
+            setSelectedPatient('');
+          }}
+          title="Log Health Data"
+        >
+          {patients.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-gray-600 mb-4">No patients available to log data for.</p>
+              <Button onClick={() => setShowHealthLogForm(false)}>
+                Close
+              </Button>
+            </div>
+          ) : (
+            <>
+              {!selectedPatient ? (
+                <div>
+                  <p className="text-gray-600 mb-4">Select a patient to log health data for:</p>
+                  <div className="space-y-2">
+                    {patients.map((patient) => (
+                      <button
+                        key={patient.id}
+                        onClick={() => setSelectedPatient(patient.id)}
+                        className="w-full text-left p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                      >
+                        <h3 className="font-medium text-gray-900">{patient.name}</h3>
+                        <p className="text-sm text-gray-600">Age: {patient.age}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <HealthLogForm
+                  patientId={selectedPatient}
+                  onSuccess={handleHealthLogSuccess}
+                  onCancel={() => {
+                    setShowHealthLogForm(false);
+                    setSelectedPatient('');
+                  }}
+                />
+              )}
+            </>
+          )}
+        </Modal>
+
+        {/* Upgrade modal */}
+        <Modal
+          isOpen={showUpgrade}
+          onClose={() => setShowUpgrade(false)}
+          title="Upgrade to Premium Care"
+          size="lg"
+        >
+          <div className="text-center space-y-6">
+            <div className="flex items-center justify-center w-20 h-20 bg-blue-100 rounded-2xl mx-auto">
+              <Crown className="w-10 h-10 text-blue-600" />
+            </div>
+            
+            <div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-4">Premium Care Plan</h3>
+              <div className="text-4xl font-bold text-blue-600 mb-2">$35<span className="text-lg text-gray-600">/month</span></div>
+              <p className="text-gray-600">Unlock advanced care management features</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
+              {[
+                'Unlimited patients',
+                'Advanced health analytics',
+                'Real-time family updates',
+                'Smart medication reminders',
+                'Custom care plans',
+                'Priority support',
+                'Health trend reports',
+                'Mobile app access'
+              ].map((feature, index) => (
+                <div key={index} className="flex items-center space-x-3">
+                  <Check className="w-5 h-5 text-green-600 flex-shrink-0" />
+                  <span className="text-gray-700">{feature}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex space-x-4">
+              <Button
+                variant="outline"
+                onClick={() => setShowUpgrade(false)}
+                className="flex-1"
+              >
+                Maybe Later
+              </Button>
+              <Button
+                onClick={() => {
+                  // This will trigger Stripe integration
+                  alert('Redirecting to secure payment setup...');
+                  setShowUpgrade(false);
+                }}
+                className="flex-1"
+              >
+                <Crown className="w-4 h-4 mr-2" />
+                Upgrade Now
+              </Button>
+            </div>
+          </div>
+        </Modal>
       </div>
     </BackgroundImage>
   );

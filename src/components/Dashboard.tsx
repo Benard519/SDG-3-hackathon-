@@ -11,7 +11,8 @@ import {
   Clock,
   Thermometer,
   Smile,
-  AlertCircle
+  AlertCircle,
+  Crown
 } from 'lucide-react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
@@ -32,6 +33,7 @@ export const Dashboard: React.FC = () => {
   const [upcomingReminders, setUpcomingReminders] = useState<Reminder[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<string>('');
   const [showHealthLogForm, setShowHealthLogForm] = useState(false);
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -46,12 +48,50 @@ export const Dashboard: React.FC = () => {
     try {
       setLoading(true);
       
-      // Fetch patients
-      const { data: patientsData } = await supabase
+      // Fetch patients for caregivers
+      let { data: patientsData } = await supabase
         .from('patients')
         .select('*')
         .eq('caregiver_id', userProfile?.id)
         .order('created_at', { ascending: false });
+
+      // Create demo data if none exists
+      if (!patientsData || patientsData.length === 0) {
+        const { data: newPatient } = await supabase
+          .from('patients')
+          .insert({
+            caregiver_id: userProfile.id,
+            name: 'Eleanor Johnson',
+            age: 78,
+            medical_conditions: ['Diabetes', 'Hypertension'],
+            emergency_contact: '+1 (555) 123-4567',
+            family_members: []
+          })
+          .select()
+          .single();
+
+        if (newPatient) {
+          patientsData = [newPatient];
+          
+          // Add demo health logs
+          await supabase.from('health_logs').insert([
+            {
+              patient_id: newPatient.id,
+              type: 'blood_pressure',
+              value: '120/80',
+              logged_by: userProfile.id,
+              created_at: new Date(Date.now() - 86400000).toISOString()
+            },
+            {
+              patient_id: newPatient.id,
+              type: 'blood_sugar',
+              value: '95',
+              logged_by: userProfile.id,
+              created_at: new Date(Date.now() - 43200000).toISOString()
+            }
+          ]);
+        }
+      }
 
       if (patientsData) {
         setPatients(patientsData);
@@ -75,12 +115,15 @@ export const Dashboard: React.FC = () => {
             .order('due_time', { ascending: true })
             .limit(5);
 
-          if (logsData) setRecentLogs(logsData);
-          if (remindersData) setUpcomingReminders(remindersData);
+          setRecentLogs(logsData || []);
+          setUpcomingReminders(remindersData || []);
         }
       }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
+      setPatients([]);
+      setRecentLogs([]);
+      setUpcomingReminders([]);
     } finally {
       setLoading(false);
     }
@@ -163,6 +206,31 @@ export const Dashboard: React.FC = () => {
         </motion.p>
       </motion.div>
 
+      {/* Upgrade prompt */}
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={ANIMATION_VARIANTS.fadeIn}
+      >
+        <Card className="border-blue-200 bg-gradient-to-r from-blue-50 to-purple-50" glass={false}>
+          <div className="flex items-center justify-between p-6">
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center justify-center w-12 h-12 bg-blue-100 rounded-xl">
+                <Crown className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Upgrade to Premium Care</h3>
+                <p className="text-gray-600">Get unlimited patients, advanced analytics, and priority support for just $35/month</p>
+              </div>
+            </div>
+            <Button onClick={() => setShowUpgrade(true)} className="whitespace-nowrap">
+              <Crown className="w-4 h-4 mr-2" />
+              Upgrade Now
+            </Button>
+          </div>
+        </Card>
+      </motion.div>
+
       {/* Quick stats */}
       <motion.div
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
@@ -235,6 +303,7 @@ export const Dashboard: React.FC = () => {
             <Button
               variant="secondary"
               className="flex items-center justify-center h-20 text-lg"
+              onClick={() => setShowUpgrade(true)}
             >
               <Calendar className="w-6 h-6 mr-2" />
               View Schedule
@@ -243,6 +312,7 @@ export const Dashboard: React.FC = () => {
             <Button
               variant="outline"
               className="flex items-center justify-center h-20 text-lg"
+              onClick={() => setShowUpgrade(true)}
             >
               <TrendingUp className="w-6 h-6 mr-2" />
               Health Reports
@@ -385,6 +455,46 @@ export const Dashboard: React.FC = () => {
             )}
           </>
         )}
+      </Modal>
+
+      {/* Upgrade modal */}
+      <Modal
+        isOpen={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+        title="Upgrade to Premium Care"
+        size="lg"
+      >
+        <div className="text-center space-y-6">
+          <div className="flex items-center justify-center w-20 h-20 bg-blue-100 rounded-2xl mx-auto">
+            <Crown className="w-10 h-10 text-blue-600" />
+          </div>
+          
+          <div>
+            <h3 className="text-2xl font-bold text-gray-900 mb-4">Premium Care Plan</h3>
+            <div className="text-4xl font-bold text-blue-600 mb-2">$35<span className="text-lg text-gray-600">/month</span></div>
+            <p className="text-gray-600">Unlock unlimited patients and advanced care management features</p>
+          </div>
+
+          <div className="flex space-x-4">
+            <Button
+              variant="outline"
+              onClick={() => setShowUpgrade(false)}
+              className="flex-1"
+            >
+              Maybe Later
+            </Button>
+            <Button
+              onClick={() => {
+                alert('Redirecting to secure payment setup...');
+                setShowUpgrade(false);
+              }}
+              className="flex-1"
+            >
+              <Crown className="w-4 h-4 mr-2" />
+              Subscribe for $35/month
+            </Button>
+          </div>
+        </div>
       </Modal>
       </div>
     </BackgroundImage>

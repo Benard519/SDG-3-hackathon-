@@ -7,14 +7,14 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  ResponsiveContainer,
-  BarChart,
-  Bar
+  ResponsiveContainer
 } from 'recharts';
-import { Heart, Activity, Thermometer, Smile, TrendingUp, Calendar } from 'lucide-react';
+import { Heart, Activity, Thermometer, Smile, TrendingUp, Calendar, Crown } from 'lucide-react';
 import { Card } from '../ui/Card';
+import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { BackgroundImage } from '../ui/BackgroundImage';
+import { Modal } from '../ui/Modal';
 import { supabase } from '../../utils/supabase';
 import { Patient, HealthLog } from '../../types';
 import { useAuth } from '../../hooks/useAuth';
@@ -27,6 +27,7 @@ export const HealthOverview: React.FC = () => {
   const [healthLogs, setHealthLogs] = useState<HealthLog[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<string>('');
   const [selectedMetric, setSelectedMetric] = useState<string>('blood_pressure');
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -56,7 +57,51 @@ export const HealthOverview: React.FC = () => {
         patientsQuery = patientsQuery.contains('family_members', [userProfile.id]);
       }
 
-      const { data: patientsData } = await patientsQuery.order('created_at', { ascending: false });
+      let { data: patientsData } = await patientsQuery.order('created_at', { ascending: false });
+
+      // Create demo data if none exists
+      if (!patientsData || patientsData.length === 0) {
+        const { data: newPatient } = await supabase
+          .from('patients')
+          .insert({
+            caregiver_id: userProfile.id,
+            name: 'Eleanor Johnson',
+            age: 78,
+            medical_conditions: ['Diabetes', 'Hypertension'],
+            emergency_contact: '+1 (555) 123-4567',
+            family_members: userProfile.role === 'family' ? [userProfile.id] : []
+          })
+          .select()
+          .single();
+
+        if (newPatient) {
+          patientsData = [newPatient];
+          
+          // Add demo health logs with varied data
+          const demoLogs = [];
+          for (let i = 0; i < 10; i++) {
+            const date = new Date(Date.now() - (i * 86400000)); // Each day back
+            demoLogs.push(
+              {
+                patient_id: newPatient.id,
+                type: 'blood_pressure',
+                value: `${120 + Math.floor(Math.random() * 20)}/${80 + Math.floor(Math.random() * 10)}`,
+                logged_by: userProfile.id,
+                created_at: date.toISOString()
+              },
+              {
+                patient_id: newPatient.id,
+                type: 'blood_sugar',
+                value: `${90 + Math.floor(Math.random() * 30)}`,
+                logged_by: userProfile.id,
+                created_at: date.toISOString()
+              }
+            );
+          }
+          
+          await supabase.from('health_logs').insert(demoLogs);
+        }
+      }
 
       if (patientsData && patientsData.length > 0) {
         setPatients(patientsData);
@@ -70,10 +115,12 @@ export const HealthOverview: React.FC = () => {
           .order('created_at', { ascending: false })
           .limit(100);
 
-        if (logsData) setHealthLogs(logsData);
+        setHealthLogs(logsData || []);
       }
     } catch (error) {
       console.error('Error fetching health data:', error);
+      setPatients([]);
+      setHealthLogs([]);
     } finally {
       setLoading(false);
     }
@@ -143,6 +190,31 @@ export const HealthOverview: React.FC = () => {
           </p>
         </motion.div>
 
+        {/* Upgrade prompt for advanced analytics */}
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={ANIMATION_VARIANTS.fadeIn}
+        >
+          <Card className="border-blue-200 bg-gradient-to-r from-blue-50 to-purple-50" glass={false}>
+            <div className="flex items-center justify-between p-6">
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center justify-center w-12 h-12 bg-blue-100 rounded-xl">
+                  <TrendingUp className="w-6 h-6 text-blue-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Advanced Health Analytics</h3>
+                  <p className="text-gray-600">Unlock detailed health trends, predictive insights, and custom reports</p>
+                </div>
+              </div>
+              <Button onClick={() => setShowUpgrade(true)} className="whitespace-nowrap">
+                <Crown className="w-4 h-4 mr-2" />
+                Upgrade for $35/month
+              </Button>
+            </div>
+          </Card>
+        </motion.div>
+
         {/* Patient and metric selection */}
         <motion.div
           initial="hidden"
@@ -155,17 +227,23 @@ export const HealthOverview: React.FC = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-3">
                   Select Patient
                 </label>
-                <select
-                  value={selectedPatient}
-                  onChange={(e) => setSelectedPatient(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg"
-                >
-                  {patients.map((patient) => (
-                    <option key={patient.id} value={patient.id}>
-                      {patient.name}
-                    </option>
-                  ))}
-                </select>
+                {patients.length > 0 ? (
+                  <select
+                    value={selectedPatient}
+                    onChange={(e) => setSelectedPatient(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg"
+                  >
+                    {patients.map((patient) => (
+                      <option key={patient.id} value={patient.id}>
+                        {patient.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="text-center py-4 text-gray-500">
+                    No patients available
+                  </div>
+                )}
               </div>
 
               <div>
@@ -220,7 +298,11 @@ export const HealthOverview: React.FC = () => {
                 <div className="flex items-center justify-center h-full text-gray-500">
                   <div className="text-center">
                     <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>No data available for this metric</p>
+                    <p className="mb-4">No data available for this metric</p>
+                    <Button onClick={() => setShowUpgrade(true)} size="sm">
+                      <Crown className="w-4 h-4 mr-2" />
+                      Upgrade for Advanced Analytics
+                    </Button>
                   </div>
                 </div>
               ) : (
@@ -302,6 +384,46 @@ export const HealthOverview: React.FC = () => {
             );
           })}
         </motion.div>
+
+        {/* Upgrade modal */}
+        <Modal
+          isOpen={showUpgrade}
+          onClose={() => setShowUpgrade(false)}
+          title="Upgrade to Premium Care"
+          size="lg"
+        >
+          <div className="text-center space-y-6">
+            <div className="flex items-center justify-center w-20 h-20 bg-blue-100 rounded-2xl mx-auto">
+              <Crown className="w-10 h-10 text-blue-600" />
+            </div>
+            
+            <div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-4">Premium Care Plan</h3>
+              <div className="text-4xl font-bold text-blue-600 mb-2">$35<span className="text-lg text-gray-600">/month</span></div>
+              <p className="text-gray-600">Unlock advanced health analytics and unlimited features</p>
+            </div>
+
+            <div className="flex space-x-4">
+              <Button
+                variant="outline"
+                onClick={() => setShowUpgrade(false)}
+                className="flex-1"
+              >
+                Maybe Later
+              </Button>
+              <Button
+                onClick={() => {
+                  alert('Redirecting to secure payment setup...');
+                  setShowUpgrade(false);
+                }}
+                className="flex-1"
+              >
+                <Crown className="w-4 h-4 mr-2" />
+                Subscribe for $35/month
+              </Button>
+            </div>
+          </div>
+        </Modal>
       </div>
     </BackgroundImage>
   );

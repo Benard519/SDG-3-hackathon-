@@ -8,7 +8,9 @@ import {
   CheckCircle,
   AlertCircle,
   Shield,
-  Bell
+  Bell,
+  Crown,
+  Plus
 } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -26,6 +28,7 @@ export const AlertsPage: React.FC = () => {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
   const [showSOSModal, setShowSOSModal] = useState(false);
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<string>('');
   const [location, setLocation] = useState('');
   const [loading, setLoading] = useState(true);
@@ -53,7 +56,27 @@ export const AlertsPage: React.FC = () => {
         patientsQuery = patientsQuery.contains('family_members', [userProfile.id]);
       }
 
-      const { data: patientsData } = await patientsQuery.order('created_at', { ascending: false });
+      let { data: patientsData } = await patientsQuery.order('created_at', { ascending: false });
+
+      // Create demo data if none exists
+      if (!patientsData || patientsData.length === 0) {
+        const { data: newPatient } = await supabase
+          .from('patients')
+          .insert({
+            caregiver_id: userProfile.id,
+            name: 'Eleanor Johnson',
+            age: 78,
+            medical_conditions: ['Diabetes', 'Hypertension'],
+            emergency_contact: '+1 (555) 123-4567',
+            family_members: userProfile.role === 'family' ? [userProfile.id] : []
+          })
+          .select()
+          .single();
+
+        if (newPatient) {
+          patientsData = [newPatient];
+        }
+      }
 
       if (patientsData && patientsData.length > 0) {
         setPatients(patientsData);
@@ -66,10 +89,12 @@ export const AlertsPage: React.FC = () => {
           .in('patient_id', patientIds)
           .order('created_at', { ascending: false });
 
-        if (alertsData) setAlerts(alertsData);
+        setAlerts(alertsData || []);
       }
     } catch (error) {
       console.error('Error fetching alerts data:', error);
+      setPatients([]);
+      setAlerts([]);
     } finally {
       setLoading(false);
     }
@@ -175,6 +200,31 @@ export const AlertsPage: React.FC = () => {
           <p className="text-xl text-gray-700 font-medium">
             Monitor and respond to emergency situations
           </p>
+        </motion.div>
+
+        {/* Upgrade prompt for premium features */}
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={ANIMATION_VARIANTS.fadeIn}
+        >
+          <Card className="border-red-200 bg-gradient-to-r from-red-50 to-orange-50" glass={false}>
+            <div className="flex items-center justify-between p-6">
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center justify-center w-12 h-12 bg-red-100 rounded-xl">
+                  <Shield className="w-6 h-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Premium Emergency Features</h3>
+                  <p className="text-gray-600">Get instant SMS alerts, GPS tracking, and 24/7 monitoring for $35/month</p>
+                </div>
+              </div>
+              <Button onClick={() => setShowUpgrade(true)} variant="emergency" className="whitespace-nowrap">
+                <Crown className="w-4 h-4 mr-2" />
+                Upgrade Now
+              </Button>
+            </div>
+          </Card>
         </motion.div>
 
         {/* SOS Button */}
@@ -288,7 +338,11 @@ export const AlertsPage: React.FC = () => {
               <div className="text-center py-12 text-gray-500">
                 <Bell className="w-16 h-16 mx-auto mb-4 opacity-50" />
                 <h3 className="text-xl font-medium text-gray-700 mb-2">No Emergency Alerts</h3>
-                <p>No emergency alerts have been triggered. This is good news!</p>
+                <p className="mb-4">No emergency alerts have been triggered. This is good news!</p>
+                <Button onClick={() => setShowSOSModal(true)} variant="outline">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Test SOS System
+                </Button>
               </div>
             ) : (
               <div className="space-y-4">
@@ -417,6 +471,46 @@ export const AlertsPage: React.FC = () => {
               >
                 <AlertTriangle className="w-4 h-4 mr-2" />
                 Send SOS Alert
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Upgrade modal */}
+        <Modal
+          isOpen={showUpgrade}
+          onClose={() => setShowUpgrade(false)}
+          title="Upgrade to Premium Care"
+          size="lg"
+        >
+          <div className="text-center space-y-6">
+            <div className="flex items-center justify-center w-20 h-20 bg-blue-100 rounded-2xl mx-auto">
+              <Crown className="w-10 h-10 text-blue-600" />
+            </div>
+            
+            <div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-4">Premium Emergency Features</h3>
+              <div className="text-4xl font-bold text-blue-600 mb-2">$35<span className="text-lg text-gray-600">/month</span></div>
+              <p className="text-gray-600">Get instant SMS alerts, GPS tracking, and 24/7 monitoring</p>
+            </div>
+
+            <div className="flex space-x-4">
+              <Button
+                variant="outline"
+                onClick={() => setShowUpgrade(false)}
+                className="flex-1"
+              >
+                Maybe Later
+              </Button>
+              <Button
+                onClick={() => {
+                  alert('Redirecting to secure payment setup...');
+                  setShowUpgrade(false);
+                }}
+                className="flex-1"
+              >
+                <Crown className="w-4 h-4 mr-2" />
+                Subscribe for $35/month
               </Button>
             </div>
           </div>

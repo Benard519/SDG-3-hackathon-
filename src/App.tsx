@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './hooks/useAuth';
 import { AuthForm } from './components/auth/AuthForm';
 import { SubscriptionPlans } from './components/payment/SubscriptionPlans';
+import { PatientManagement } from './components/patients/PatientManagement';
 import { Navbar } from './components/navigation/Navbar';
 import { Dashboard } from './components/Dashboard';
 import { FamilyDashboard } from './components/family/FamilyDashboard';
